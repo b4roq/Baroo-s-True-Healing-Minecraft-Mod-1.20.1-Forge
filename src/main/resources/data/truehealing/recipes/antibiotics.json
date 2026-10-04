@@ -1,0 +1,8 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "ingredients": [
+    { "item": "minecraft:redstone" },
+    { "item": "minecraft:glass" }
+  ],
+  "result": { "item": "truehealing:antibiotics", "count": 2 }
+}

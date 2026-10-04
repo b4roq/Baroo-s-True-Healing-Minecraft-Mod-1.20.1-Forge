@@ -1,0 +1,3 @@
+{ "type": "minecraft:crafting_shapeless",
+  "ingredients": [ { "tag": "minecraft:wool" } ],
+  "result": { "item": "truehealing:rag", "count": 2 } }

@@ -1,0 +1,8 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "ingredients": [
+    { "item": "minecraft:stick" }, { "item": "minecraft:stick" },
+    { "item": "minecraft:iron_nugget" }, { "item": "minecraft:iron_nugget" }
+  ],
+  "result": { "item": "truehealing:splint", "count": 1 }
+}

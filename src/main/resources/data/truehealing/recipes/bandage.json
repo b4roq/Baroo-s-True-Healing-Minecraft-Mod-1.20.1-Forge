@@ -1,0 +1,3 @@
+{ "type": "minecraft:crafting_shapeless",
+  "ingredients": [ { "item": "truehealing:rag" }, { "item": "truehealing:rag" }, { "item": "minecraft:string" } ],
+  "result": { "item": "truehealing:bandage", "count": 2 } }

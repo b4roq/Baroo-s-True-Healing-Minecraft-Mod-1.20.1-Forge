@@ -1,0 +1,3 @@
+{ "type": "minecraft:crafting_shapeless",
+  "ingredients": [ { "item": "minecraft:iron_nugget" }, { "item": "minecraft:string" }, { "item": "minecraft:string" } ],
+  "result": { "item": "truehealing:suture_kit", "count": 1 } }
