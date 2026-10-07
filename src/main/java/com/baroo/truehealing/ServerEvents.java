@@ -19,6 +19,7 @@ import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.monster.Enemy;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.event.RegisterCommandsEvent;
@@ -28,6 +29,7 @@ import net.minecraftforge.event.entity.living.LivingDeathEvent;
 import net.minecraftforge.event.entity.living.LivingFallEvent;
 import net.minecraftforge.event.entity.living.LivingHealEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
+import net.minecraftforge.event.entity.player.PlayerSleepInBedEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
@@ -149,6 +151,17 @@ public final class ServerEvents {
     public static void onHeal(LivingHealEvent e) {
         if (e.getEntity() instanceof ServerPlayer p && e.getAmount() <= 1.0f && InjuryManager.isBleeding(p)) {
             e.setCanceled(true);
+        }
+    }
+
+    /** Project Zomboid rule: in major pain (stage 3) or agony (stage 4) you can't sleep. */
+    @SubscribeEvent
+    public static void onSleep(PlayerSleepInBedEvent e) {
+        if (!TrueHealingConfig.ENABLED.get() || !TrueHealingConfig.BLOCK_SLEEP_IN_PAIN.get()) return;
+        if (!(e.getEntity() instanceof ServerPlayer p)) return;
+        if (p.getMaxHealth() > 0 && p.getHealth() / p.getMaxHealth() < 0.55f) {
+            e.setResult(Player.BedSleepingProblem.OTHER_PROBLEM);
+            p.displayClientMessage(Component.literal("You are in too much pain to sleep."), true);
         }
     }
 

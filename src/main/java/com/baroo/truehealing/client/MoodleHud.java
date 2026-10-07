@@ -31,13 +31,14 @@ public final class MoodleHud {
     // icon columns in the second row of the atlas
     private static final int ICON_FOOD = 0, ICON_PANIC = 1, ICON_BLEED = 2, ICON_INJURED = 3, ICON_PAIN = 4, ICON_LEG = 5;
 
-    private static final int BASE_SIZE = 24, BASE_GAP = 3, PAD = 6;
-    public static final int PANEL_W = BASE_SIZE + PAD * 2;
+    private static final int BASE_SIZE = 24, BASE_GAP = 3;
+    public static final int PANEL_W = BASE_SIZE;
 
     public record Moodle(int bg, int icon, String title, List<String> lines) {}
 
     public record Placed(Moodle m, int x, int y, int size) {}
 
+    /** A plain column of icons (no background). */
     public record Panel(int x, int y, int w, int h, List<Placed> items) {}
 
     private MoodleHud() {}
@@ -55,22 +56,29 @@ public final class MoodleHud {
         if (p == null) return out;
         InjuryData d = ClientData.data;
 
-        // ---- nourishment: hunger (red) or saturation (green), like AppleSkin ----
+        // ---- nourishment: hunger (red) or being well fed (green), like AppleSkin ----
         FoodData fd = p.getFoodData();
         int food = fd.getFoodLevel();
         float sat = fd.getSaturationLevel();
-        String foodLine = "Food " + food + "/20, saturation " + String.format("%.1f", sat);
         if (food <= 14) {
             int lv = food <= 2 ? 4 : food <= 6 ? 3 : food <= 10 ? 2 : 1;
             out.add(new Moodle(red(lv), ICON_FOOD,
-                    new String[]{"Slightly hungry", "Hungry", "Very hungry", "Starving"}[lv - 1],
-                    List.of(foodLine, "Eat something.")));
+                    new String[]{"Peckish", "Hungry", "Very hungry", "Starving"}[lv - 1],
+                    List.of(new String[]{
+                            "Could do with a bite to eat.",
+                            "Could eat a horse right now.",
+                            "You'll need a big meal to satiate your hunger.",
+                            "Health now falling away."}[lv - 1])));
         } else {
             int lv = sat >= 19.5f ? 4 : sat >= 15f ? 3 : sat >= 10f ? 2 : sat >= 5f ? 1 : 0;
             if (lv > 0) {
                 out.add(new Moodle(green(lv), ICON_FOOD,
-                        new String[]{"Satisfied", "Well fed", "Very well fed", "Full to bursting"}[lv - 1],
-                        List.of(foodLine)));
+                        new String[]{"Slightly fed", "Fed", "Well fed", "Full to bursting"}[lv - 1],
+                        List.of(new String[]{
+                                "Not hungry, for now.",
+                                "You feel full.",
+                                "Full and energized.",
+                                "Couldn't manage one more solitary bite."}[lv - 1])));
             }
         }
 
@@ -80,7 +88,11 @@ public final class MoodleHud {
             int lv = Math.min(4, pan);
             out.add(new Moodle(red(lv), ICON_PANIC,
                     new String[]{"Slightly panicked", "Panicked", "Very panicked", "Extremely panicked"}[lv - 1],
-                    List.of("Hostile mobs are hunting you.")));
+                    List.of(new String[]{
+                            "Do your best to stay calm.",
+                            "Thing's are getting a little bit too tense around you.",
+                            "Your mind is racing, You're too overwhelmed",
+                            "Aaaaaaaaghhh!!!"}[lv - 1])));
         }
 
         // ---- bleeding / injured ----
@@ -102,22 +114,34 @@ public final class MoodleHud {
             int lv = rate < 1.5 ? 1 : rate < 3 ? 2 : rate < 5 ? 3 : 4;
             out.add(new Moodle(red(lv), ICON_BLEED,
                     new String[]{"Minor bleeding", "Bleeding", "Heavy bleeding", "Severe bleeding"}[lv - 1],
-                    List.of(bleeding + (bleeding == 1 ? " wound is" : " wounds are") + " bleeding.", "Apply a bandage or stitches.")));
+                    List.of(new String[]{
+                            "Bandage required.",
+                            "Bleeding from open wounds.",
+                            "Heavy bleeding from serious wounds.",
+                            "Death imminent."}[lv - 1])));
         }
         if (wounds > 0) {
             int lv = score < 2.5 ? 1 : score < 5 ? 2 : score < 8 ? 3 : 4;
             out.add(new Moodle(red(lv), ICON_INJURED,
                     new String[]{"Slightly injured", "Injured", "Badly injured", "Critically injured"}[lv - 1],
-                    List.of(wounds + (wounds == 1 ? " injury." : " injuries."))));
+                    List.of(new String[]{
+                            "First aid required.",
+                            "Your wounds need treatment.",
+                            "Your injuries are severe.",
+                            "Not going gently into that good night."}[lv - 1])));
         }
 
-        // ---- pain: follows your health ----
+        // ---- pain: follows your health (levels 3 and 4 also stop you from sleeping) ----
         float frac = p.getMaxHealth() <= 0 ? 1f : p.getHealth() / p.getMaxHealth();
         int pain = frac >= 0.98f ? 0 : frac >= 0.85f ? 1 : frac >= 0.55f ? 2 : frac >= 0.35f ? 3 : 4;
         if (pain > 0) {
             out.add(new Moodle(red(pain), ICON_PAIN,
                     new String[]{"Minor pain", "Mild pain", "Major pain", "Agony"}[pain - 1],
-                    List.of("Health: " + Math.round(frac * 100) + "%")));
+                    List.of(new String[]{
+                            "Feeling slight pain.",
+                            "In a moderate amount of pain.",
+                            "In too much pain to sleep.",
+                            "In complete agony. Too much pain to sleep."}[pain - 1])));
         }
 
         // ---- restricted movement: broken legs ----
@@ -125,7 +149,11 @@ public final class MoodleHud {
         if (slow > 0) {
             int lv = slow < 0.15 ? 1 : slow < 0.25 ? 2 : slow < 0.35 ? 3 : 4;
             out.add(new Moodle(red(lv), ICON_LEG, "Restricted movement",
-                    List.of("Walking speed -" + Math.round(slow * 100) + "%", "Splint your broken leg.")));
+                    List.of(new String[]{
+                            "Moving a little slower than usual.",
+                            "Every step hurts. Movement restricted.",
+                            "Limping badly. Movement highly restricted.",
+                            "Barely able to move. Find a splint."}[lv - 1])));
         }
         return out;
     }
@@ -205,7 +233,7 @@ public final class MoodleHud {
         if (!TrueHealingClientConfig.MOODLES_ENABLED.get()) return;
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.options.hideGui) return;
-        // the inventory and the medical screen draw their own moodle panels
+        // the inventory and the medical screen draw their own moodle columns
         if (mc.screen instanceof InventoryScreen || mc.screen instanceof MedicalScreen) return;
         List<Placed> list = hudLayout(mc, screenW);
         track(list.stream().map(Placed::m).toList());
@@ -218,38 +246,33 @@ public final class MoodleHud {
         return tipIn(hudLayout(mc, screenW), mx, my);
     }
 
-    // ---------------- panels (blue column behind the icons) ----------------
+    // ---------------- plain icon columns (inventory + medical screen) ----------------
 
     public static Panel panel(Minecraft mc, int x, int y) {
         if (!TrueHealingClientConfig.MOODLES_ENABLED.get() || mc.player == null) return null;
         List<Moodle> moodles = current(mc);
         if (moodles.isEmpty()) return null;
         int n = moodles.size();
-        int w = PANEL_W;
-        int h = n * BASE_SIZE + (n - 1) * BASE_GAP + PAD * 2;
+        int h = n * BASE_SIZE + (n - 1) * BASE_GAP;
         List<Placed> items = new ArrayList<>();
         for (int i = 0; i < n; i++) {
-            items.add(new Placed(moodles.get(i), x + PAD, y + PAD + i * (BASE_SIZE + BASE_GAP), BASE_SIZE));
+            items.add(new Placed(moodles.get(i), x, y + i * (BASE_SIZE + BASE_GAP), BASE_SIZE));
         }
-        return new Panel(x, y, w, h, items);
+        return new Panel(x, y, BASE_SIZE, h, items);
     }
 
     /**
-     * Beside the inventory, where vanilla shows potion effects. When effects are active the panel moves
-     * out past them, so with no effects the moodles take the effects' spot.
+     * On the LEFT of the inventory, aligned with its top. When the recipe book is open it pushes the
+     * inventory to the right, so the column moves out past the book and stays visible.
      */
     public static Panel inventoryPanel(Minecraft mc, InventoryScreen s) {
-        int x = s.getGuiLeft() + s.getXSize() + 2;
-        int avail = s.width - x;
-        if (mc.player != null && !mc.player.getActiveEffects().isEmpty() && avail >= 32) {
-            x += (avail >= 120 ? 120 : 32) + 4;
-        }
+        int left = s.getGuiLeft();
+        if (s.getRecipeBookComponent().isVisible()) left -= 148; // width of the recipe book
+        int x = Math.max(2, left - 4 - BASE_SIZE);
         return panel(mc, x, s.getGuiTop());
     }
 
     public static void drawPanel(GuiGraphics g, Panel p) {
-        g.fill(p.x(), p.y(), p.x() + p.w(), p.y() + p.h(), 0xCC243A68);
-        g.renderOutline(p.x(), p.y(), p.w(), p.h(), 0x80405A8C);
         track(p.items().stream().map(Placed::m).toList());
         drawIcons(g, p.items());
     }

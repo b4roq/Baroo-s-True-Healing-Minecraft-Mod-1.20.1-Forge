@@ -575,7 +575,7 @@ public class MedicalScreen extends Screen {
         drawRightColumn(g, mx, my);
         drawAction(g);
 
-        MoodleHud.Panel moodles = MoodleHud.panel(minecraft, centerEnd - 8 - MoodleHud.PANEL_W, 82);
+        MoodleHud.Panel moodles = MoodleHud.panel(minecraft, centerEnd - 14 - MoodleHud.PANEL_W, 88);
         if (moodles != null) {
             g.pose().pushPose();
             g.pose().translate(0, 0, 260);

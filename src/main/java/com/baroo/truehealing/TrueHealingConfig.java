@@ -23,6 +23,7 @@ public final class TrueHealingConfig {
     public static final ForgeConfigSpec.DoubleValue ANTIBIOTIC_FACTOR;
     public static final ForgeConfigSpec.IntValue ANTIBIOTIC_SECONDS;
     public static final ForgeConfigSpec.DoubleValue ACTION_TIME_MULT;
+    public static final ForgeConfigSpec.BooleanValue BLOCK_SLEEP_IN_PAIN;
 
     static {
         ForgeConfigSpec.Builder b = new ForgeConfigSpec.Builder();
@@ -60,6 +61,8 @@ public final class TrueHealingConfig {
                 .defineInRange("antibioticDurationSeconds", 360, 10, 86400);
         ACTION_TIME_MULT = b.comment("Multiplier for how long treatments take (1.0 = default, 0.5 = twice as fast).")
                 .defineInRange("actionTimeMultiplier", 1.0, 0.1, 5.0);
+        BLOCK_SLEEP_IN_PAIN = b.comment("You cannot sleep in a bed while in major pain or agony (under 55% health).")
+                .define("blockSleepInPain", true);
         SPEC = b.build();
     }
 
