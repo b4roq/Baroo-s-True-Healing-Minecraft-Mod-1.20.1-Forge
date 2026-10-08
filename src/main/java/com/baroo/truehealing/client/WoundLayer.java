@@ -41,9 +41,11 @@ public class WoundLayer extends RenderLayer<AbstractClientPlayer, PlayerModel<Ab
     private static final int[] WOOD_LIGHT = {146, 96, 52};
     private static final int[] WIRE = {112, 112, 118};
 
+    private final boolean slim;
+
     public WoundLayer(RenderLayerParent<AbstractClientPlayer, PlayerModel<AbstractClientPlayer>> parent, boolean slim) {
         super(parent);
-        // Bandages always use the 4px-wide (Steve) arm size, so `slim` is not needed.
+        this.slim = slim; // Alex (slim) arms are 3px wide, so wraps and marks are fitted to them
     }
 
     @Override
@@ -65,12 +67,12 @@ public class WoundLayer extends RenderLayer<AbstractClientPlayer, PlayerModel<Ab
     }
 
     /** x0,y0,z0,x1,y1,z1 of the cube in model pixels, relative to the part's pivot (arms use the 4px width). */
-    private static float[] bounds(BodyPart bp) {
+    private float[] bounds(BodyPart bp) {
         return switch (bp) {
             case HEAD -> new float[]{-4, -8, -4, 4, 0, 4};
             case TORSO -> new float[]{-4, 0, -2, 4, 12, 2};
-            case RIGHT_ARM -> new float[]{-3, -2, -2, 1, 10, 2};
-            case LEFT_ARM -> new float[]{-1, -2, -2, 3, 10, 2};
+            case RIGHT_ARM -> slim ? new float[]{-2, -2, -2, 1, 10, 2} : new float[]{-3, -2, -2, 1, 10, 2};
+            case LEFT_ARM -> slim ? new float[]{-1, -2, -2, 2, 10, 2} : new float[]{-1, -2, -2, 3, 10, 2};
             case RIGHT_LEG, LEFT_LEG -> new float[]{-2, 0, -2, 2, 12, 2};
         };
     }

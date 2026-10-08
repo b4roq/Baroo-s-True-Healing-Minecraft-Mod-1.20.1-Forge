@@ -24,6 +24,13 @@ public final class TrueHealingConfig {
     public static final ForgeConfigSpec.IntValue ANTIBIOTIC_SECONDS;
     public static final ForgeConfigSpec.DoubleValue ACTION_TIME_MULT;
     public static final ForgeConfigSpec.BooleanValue BLOCK_SLEEP_IN_PAIN;
+    public static final ForgeConfigSpec.IntValue ANTIBIOTIC_MAX_SECONDS;
+    public static final ForgeConfigSpec.DoubleValue INFECTED_HEAL_MULT;
+    public static final ForgeConfigSpec.DoubleValue SICKNESS_DECAY;
+    public static final ForgeConfigSpec.DoubleValue WIPE_CURE_RATE;
+    public static final ForgeConfigSpec.BooleanValue ARMOR_DEFLECT_ENABLED;
+    public static final ForgeConfigSpec.DoubleValue ARMOR_MAX_DEFLECT;
+    public static final ForgeConfigSpec.DoubleValue SKELETON_ARROW_MULT;
 
     static {
         ForgeConfigSpec.Builder b = new ForgeConfigSpec.Builder();
@@ -63,6 +70,20 @@ public final class TrueHealingConfig {
                 .defineInRange("actionTimeMultiplier", 1.0, 0.1, 5.0);
         BLOCK_SLEEP_IN_PAIN = b.comment("You cannot sleep in a bed while in major pain or agony (under 55% health).")
                 .define("blockSleepInPain", true);
+        ANTIBIOTIC_MAX_SECONDS = b.comment("Antibiotic effect never stacks past this many seconds (720 = 12 minutes).")
+                .defineInRange("antibioticMaxSeconds", 720, 10, 86400);
+        INFECTED_HEAL_MULT = b.comment("How fast an infected wound still heals (0.5 = half speed, 0 = it cannot heal while infected).")
+                .defineInRange("infectedHealMultiplier", 0.5, 0.0, 1.0);
+        SICKNESS_DECAY = b.comment("How fast the lingering sickness fades after an infected wound healed, in percent per second.")
+                .defineInRange("sicknessDecayPercentPerSecond", 0.15, 0.0, 10.0);
+        WIPE_CURE_RATE = b.comment("After alcohol wipes are used, infection keeps dropping by this many percent per second until it is gone.")
+                .defineInRange("wipeCurePercentPerSecond", 0.25, 0.01, 10.0);
+        ARMOR_DEFLECT_ENABLED = b.comment("Worn armor can deflect injuries (the hit still hurts, but no wound).")
+                .define("armorDeflectsInjuries", true);
+        ARMOR_MAX_DEFLECT = b.comment("Highest possible chance for armor to deflect an injury (0.85 = 85%).")
+                .defineInRange("armorMaxDeflect", 0.85, 0.0, 1.0);
+        SKELETON_ARROW_MULT = b.comment("Skeleton arrows cause injuries this much as often as other hits (0.5 = half as often).")
+                .defineInRange("skeletonArrowInjuryMultiplier", 0.5, 0.0, 1.0);
         SPEC = b.build();
     }
 

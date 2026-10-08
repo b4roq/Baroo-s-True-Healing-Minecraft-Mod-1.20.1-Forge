@@ -18,6 +18,7 @@ import net.minecraft.util.RandomSource;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.monster.AbstractSkeleton;
 import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.AABB;
@@ -28,6 +29,7 @@ import net.minecraftforge.event.entity.living.LivingDamageEvent;
 import net.minecraftforge.event.entity.living.LivingDeathEvent;
 import net.minecraftforge.event.entity.living.LivingFallEvent;
 import net.minecraftforge.event.entity.living.LivingHealEvent;
+import net.minecraftforge.event.entity.living.LivingHurtEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.event.entity.player.PlayerSleepInBedEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -36,6 +38,8 @@ import net.minecraftforge.fml.common.Mod;
 @Mod.EventBusSubscriber(modid = TrueHealing.MODID)
 public final class ServerEvents {
     private static final Map<UUID, Integer> PANIC = new HashMap<>();
+    /** Whether the player had absorption hearts right before the current hit. */
+    private static final Map<UUID, Boolean> HAD_ABSORPTION = new HashMap<>();
 
     private ServerEvents() {}
 
@@ -78,6 +82,14 @@ public final class ServerEvents {
         return BodyPart.RIGHT_LEG;
     }
 
+    /** Runs before absorption is subtracted, so we know if the player was shielded by absorption hearts. */
+    @SubscribeEvent
+    public static void onHurt(LivingHurtEvent e) {
+        if (e.getEntity() instanceof ServerPlayer p) {
+            HAD_ABSORPTION.put(p.getUUID(), p.getAbsorptionAmount() > 0f);
+        }
+    }
+
     @SubscribeEvent
     public static void onDamage(LivingDamageEvent e) {
         if (!TrueHealingConfig.ENABLED.get()) return;
@@ -85,10 +97,15 @@ public final class ServerEvents {
         if (!(e.getEntity() instanceof ServerPlayer p)) return;
         if (p.isCreative() || p.isSpectator()) return;
 
+        Boolean hadAbsorption = HAD_ABSORPTION.remove(p.getUUID());
+
         float amount = e.getAmount();
         if (amount < 1.0f) return;
 
         InjuryManager.cancelAction(p, "Interrupted!");
+
+        // absorption hearts soak up injuries too, until they are used up (or the effect ends)
+        if (hadAbsorption != null && hadAbsorption) return;
 
         DamageSource src = e.getSource();
         Entity attacker = src.getEntity();
@@ -98,10 +115,12 @@ public final class ServerEvents {
 
         RandomSource rnd = p.getRandom();
         boolean projectile = direct != null && direct != attacker;
+        boolean skeletonArrow = projectile && attacker instanceof AbstractSkeleton;
 
         double chance = Mth.clamp(TrueHealingConfig.WOUND_CHANCE_BASE.get()
                 + amount * TrueHealingConfig.WOUND_CHANCE_PER_DAMAGE.get(), 0.0, 1.0);
         if (projectile || explosion) chance = Math.min(1.0, chance + 0.3);
+        if (skeletonArrow) chance *= TrueHealingConfig.SKELETON_ARROW_MULT.get();
         if (rnd.nextDouble() > chance) return;
 
         // body part
@@ -120,9 +139,16 @@ public final class ServerEvents {
             else part = BodyPart.RIGHT_LEG;
         }
 
+        // armor on that body part can deflect the injury (the hit itself still hurts)
+        ArmorProtection.Kind kind = explosion ? ArmorProtection.Kind.EXPLOSION
+                : projectile ? ArmorProtection.Kind.PROJECTILE : ArmorProtection.Kind.GENERIC;
+        double deflect = ArmorProtection.forPart(p, part, kind);
+        if (deflect > 0 && rnd.nextDouble() < deflect) return;
+
         // wound type: scratch < laceration < deep wound
         WoundType type;
         if (explosion) type = WoundType.DEEP_WOUND;
+        else if (skeletonArrow) type = rnd.nextFloat() < 0.85f ? WoundType.LACERATION : WoundType.DEEP_WOUND;
         else if (projectile) type = rnd.nextFloat() < 0.65f ? WoundType.DEEP_WOUND : WoundType.LACERATION;
         else type = rnd.nextFloat() < 0.40f ? WoundType.LACERATION : WoundType.SCRATCH;
         if (amount >= 8f && type == WoundType.SCRATCH) type = WoundType.LACERATION;
@@ -167,16 +193,16 @@ public final class ServerEvents {
 
     // ---------------- panic (for the panic moodle) ----------------
 
-    /** 0 = calm, 1..4 by how many hostile mobs are currently hunting the player. */
+    /** 0 = calm. Panic starts when MORE than 3 hostile mobs are hunting the player. */
     private static int panicLevel(ServerPlayer p) {
         if (p.isCreative() || p.isSpectator() || !p.isAlive()) return 0;
         AABB box = p.getBoundingBox().inflate(24.0);
         int n = p.level().getEntitiesOfClass(Mob.class, box,
                 m -> m instanceof Enemy && m.isAlive() && m.getTarget() == p).size();
-        if (n <= 0) return 0;
-        if (n <= 2) return 1;
-        if (n <= 5) return 2;
-        if (n <= 9) return 3;
+        if (n <= 3) return 0;
+        if (n <= 5) return 1;
+        if (n <= 8) return 2;
+        if (n <= 12) return 3;
         return 4;
     }
 
@@ -214,6 +240,7 @@ public final class ServerEvents {
         if (e.getEntity() instanceof ServerPlayer p) {
             InjuryManager.unload(p);
             PANIC.remove(p.getUUID());
+            HAD_ABSORPTION.remove(p.getUUID());
         }
     }
 

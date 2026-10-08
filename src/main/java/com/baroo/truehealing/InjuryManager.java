@@ -25,14 +25,14 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Blocks;
 
-/** Server-side injury logic: storage, wound creation, ticking, timed treatments. */
+/** Server-side injury logic: storage, wound creation, infection, ticking, timed treatments. */
 public final class InjuryManager {
     private static final String NBT_KEY = "truehealing_injuries";
-    private static final int DISINFECT_TICKS = 6000; // infection progress pauses for 5 min after a wipe
+    private static final int DISINFECT_TICKS = 6000; // fresh-wipe protection against new infection (5 min)
     private static final Map<UUID, InjuryData> CACHE = new HashMap<>();
     private static final Map<UUID, Pending> PENDING = new HashMap<>();
 
-    /** True while TrueHealing itself is dealing bleed damage, so it doesn't create new wounds. */
+    /** True while the mod itself is dealing bleed damage, so it doesn't create new wounds. */
     public static boolean applyingBleed = false;
 
     private static final class Pending {
@@ -104,7 +104,7 @@ public final class InjuryManager {
 
     // ---------------- wound creation (one wound per limb) ----------------
 
-    /** Dressing items go back to the player when a worse wound replaces the old one. */
+    /** Dressing items go back to the player when a dressing is removed or a worse wound replaces the old one. */
     private static void giveBackDressing(ServerPlayer p, Wound w) {
         boolean dirty = w.isDressingDirty();
         switch (w.dressing) {
@@ -130,6 +130,7 @@ public final class InjuryManager {
         if (existing != null) {
             if (existing.type.severity >= type.severity) return;
             giveBackDressing(p, existing);
+            d.sickness = Math.max(d.sickness, existing.infection); // an old infection lingers as sickness
             list.remove(existing);
         }
         list.add(new Wound(type));
@@ -140,15 +141,31 @@ public final class InjuryManager {
 
     public static void infectAll(ServerPlayer p) {
         InjuryData d = get(p);
-        for (BodyPart part : BodyPart.values())
-            for (Wound w : d.get(part)) if (w.type != WoundType.FRACTURE) w.infection = Math.max(w.infection, 30f);
+        for (BodyPart part : BodyPart.values()) {
+            for (Wound w : d.get(part)) {
+                if (w.type == WoundType.FRACTURE) continue;
+                w.infection = Math.max(w.infection, 30f);
+                w.curing = false;
+            }
+        }
         sync(p);
     }
 
+    /** Eating antibiotics: -20% infection everywhere, and slower infection for a while (never stacking past the cap). */
     public static void takeAntibiotics(ServerPlayer p) {
         InjuryData d = get(p);
-        d.antibioticTicks = Math.min(d.antibioticTicks + TrueHealingConfig.ANTIBIOTIC_SECONDS.get() * 20, 72000);
-        msg(p, "You took antibiotics. Infections spread more slowly for a while.");
+        int max = TrueHealingConfig.ANTIBIOTIC_MAX_SECONDS.get() * 20;
+        d.antibioticTicks = Math.min(d.antibioticTicks + TrueHealingConfig.ANTIBIOTIC_SECONDS.get() * 20, max);
+        for (BodyPart part : BodyPart.values()) {
+            for (Wound w : d.get(part)) {
+                if (w.infection > 0f) {
+                    w.infection = Math.max(0f, w.infection - 20f);
+                    if (w.infection <= 0f) w.curing = false;
+                }
+            }
+        }
+        d.sickness = Math.max(0f, d.sickness - 20f);
+        msg(p, "You took antibiotics. Infections drop and spread more slowly for a while.");
         save(p);
         sync(p);
     }
@@ -187,7 +204,7 @@ public final class InjuryManager {
         if (inst != null && inst.getModifier(SLOW_UUID) != null) inst.removeModifier(SLOW_UUID);
     }
 
-    // ---------------- ticking (called once per second) ----------------
+    // ---------------- infection rules ----------------
 
     private static double infectionRiskMult(Wound w) {
         double m;
@@ -198,16 +215,49 @@ public final class InjuryManager {
         return m;
     }
 
+    /**
+     * How fast an existing infection grows. A stitched wound under a CLEAN bandage is sealed: the infection
+     * holds where it is (it grows again once the bandage turns dirty). A clean rag/bandage/bandaid or
+     * stitches slow it down; a dirty dressing does not.
+     */
+    private static double progression(Wound w) {
+        boolean clean = w.dressing != DressingType.NONE && !w.isDressingDirty();
+        if (w.dressing == DressingType.BANDAGE && clean && w.stitched) return 0.0;
+        double m = 1.0;
+        if (clean) m *= 0.5;
+        if (w.stitched) m *= 0.5;
+        return m;
+    }
+
+    private static int sickBand(float v) {
+        return v <= 0f ? 0 : v < 25f ? 1 : v < 50f ? 2 : v < 75f ? 3 : 4;
+    }
+
+    // ---------------- ticking (called once per second) ----------------
+
     public static void tick(ServerPlayer p) {
         InjuryData d = get(p);
         updateSlow(p, d);
         if (d.antibioticTicks > 0) d.antibioticTicks = Math.max(0, d.antibioticTicks - 20);
-        if (d.isEmpty()) return;
-        if (p.isCreative() || p.isSpectator()) return;
 
         boolean changed = false;
+        if (d.sickness > 0f) {
+            int before = sickBand(d.sickness);
+            d.sickness = Math.max(0f, d.sickness - TrueHealingConfig.SICKNESS_DECAY.get().floatValue());
+            if (sickBand(d.sickness) != before) changed = true;
+        }
+        if (d.isEmpty() && d.sickness <= 0f) {
+            if (changed) {
+                save(p);
+                sync(p);
+            }
+            return;
+        }
+        if (p.isCreative() || p.isSpectator()) return;
+
         double drain = 0;
-        float worst = 0f;
+        float worst = d.sickness;
+        boolean abx = d.antibioticTicks > 0;
 
         for (BodyPart part : BodyPart.values()) {
             Iterator<Wound> it = d.get(part).iterator();
@@ -235,29 +285,34 @@ public final class InjuryManager {
                         changed = true;
                         msg(p, "Your " + part.label.toLowerCase() + " wound looks infected!");
                     }
+                } else if (w.curing) {
+                    // alcohol wipes: the infection keeps dropping until it is gone
+                    w.infection = Math.max(0f, w.infection - TrueHealingConfig.WIPE_CURE_RATE.get().floatValue());
+                    if (w.infection <= 0f) {
+                        w.curing = false;
+                        changed = true;
+                        msg(p, "The infection in your " + part.label.toLowerCase() + " is gone.");
+                    }
                 } else {
                     double rate = TrueHealingConfig.INFECTION_SPEED.get()
-                            * (d.antibioticTicks > 0 ? TrueHealingConfig.ANTIBIOTIC_FACTOR.get() : 1.0);
-                    if (w.disinfectTicks > 0) rate = 0;
-                    else {
-                        if (w.dressing != DressingType.NONE && !w.isDressingDirty()) rate *= 0.6;
-                        if (w.stitched) rate *= 0.5;
-                    }
+                            * (abx ? TrueHealingConfig.ANTIBIOTIC_FACTOR.get() : 1.0) * progression(w);
                     w.infection = (float) Math.min(100.0, w.infection + rate);
-                    worst = Math.max(worst, w.infection);
                 }
+                if (w.isInfected()) worst = Math.max(worst, w.infection);
 
                 // healing: scratch 5 min, laceration 15 min (10 once stitched), deep wound 15 min regardless
                 boolean canHeal;
                 if (w.type == WoundType.FRACTURE) canHeal = w.splinted;
-                else if (w.isInfected()) canHeal = false;
                 else if (w.type == WoundType.DEEP_WOUND) canHeal = true;
                 else canHeal = w.stitched || w.dressing != DressingType.NONE || w.type == WoundType.SCRATCH;
                 if (canHeal) {
                     double hrate = 1.0;
                     if (w.type == WoundType.LACERATION && w.stitched) hrate = 1.5;
+                    if (w.isInfected()) hrate *= TrueHealingConfig.INFECTED_HEAL_MULT.get();
                     w.healProgress += (int) (20 * hrate * TrueHealingConfig.HEAL_SPEED_MULT.get());
                     if (w.healProgress >= w.type.healTicks) {
+                        // an infection that outlives its wound lingers as sickness and then fades slowly
+                        if (w.infection > 0f) d.sickness = Math.max(d.sickness, w.infection);
                         it.remove();
                         changed = true;
                         msg(p, "Your " + part.label.toLowerCase() + " wound has healed.");
@@ -266,7 +321,7 @@ public final class InjuryManager {
             }
         }
 
-        // infection effects
+        // sickness effects (from infected wounds and lingering sickness)
         if (worst >= 25f) p.addEffect(new MobEffectInstance(MobEffects.WEAKNESS, 80, 0, false, false, true));
         if (worst >= 50f) p.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SLOWDOWN, 80, 0, false, false, true));
         if (worst >= 75f) {
@@ -284,7 +339,7 @@ public final class InjuryManager {
             }
         }
 
-        if (changed || p.tickCount % 100 == 0) {
+        if (changed || p.tickCount % 100 == 0 || (worst > 0f && p.tickCount % 40 == 0)) {
             save(p);
             sync(p);
         }
@@ -357,11 +412,37 @@ public final class InjuryManager {
         if (!p.getInventory().add(stack)) p.drop(stack, false);
     }
 
+    /** Which dressing an apply-action puts on (dirty rags/bandages are the same dressing, just already dirty). */
+    private static DressingType dressingOf(TreatAction a) {
+        return switch (a) {
+            case RAG, DIRTY_RAG -> DressingType.RAG;
+            case BANDAGE, DIRTY_BANDAGE -> DressingType.BANDAGE;
+            case BANDAID -> DressingType.BANDAID;
+            default -> DressingType.NONE;
+        };
+    }
+
+    private static Item itemOf(TreatAction a) {
+        return switch (a) {
+            case RAG -> TrueHealing.RAG.get();
+            case DIRTY_RAG -> TrueHealing.DIRTY_RAG.get();
+            case BANDAGE -> TrueHealing.BANDAGE.get();
+            case DIRTY_BANDAGE -> TrueHealing.DIRTY_BANDAGE.get();
+            case BANDAID -> TrueHealing.BANDAID.get();
+            default -> null;
+        };
+    }
+
+    private static boolean isApply(TreatAction a) {
+        return a == TreatAction.RAG || a == TreatAction.BANDAGE || a == TreatAction.BANDAID
+                || a == TreatAction.DIRTY_RAG || a == TreatAction.DIRTY_BANDAGE;
+    }
+
     // ---------------- timed actions ----------------
 
     private static int duration(TreatAction a, Wound target) {
         int base = switch (a) {
-            case RAG, BANDAGE -> 30;            // 1.5 s
+            case RAG, BANDAGE, DIRTY_RAG, DIRTY_BANDAGE -> 30; // 1.5 s
             case BANDAID -> 20;                 // 1 s
             case DISINFECT -> 30;               // 1.5 s
             case SPLINT -> 60;                  // 3 s
@@ -375,7 +456,9 @@ public final class InjuryManager {
     private static String label(TreatAction a) {
         return switch (a) {
             case RAG -> "Applying rag...";
+            case DIRTY_RAG -> "Applying dirty rag...";
             case BANDAGE -> "Applying bandage...";
+            case DIRTY_BANDAGE -> "Applying dirty bandage...";
             case BANDAID -> "Applying bandaid...";
             case DISINFECT -> "Disinfecting...";
             case STITCH -> "Stitching...";
@@ -390,6 +473,14 @@ public final class InjuryManager {
         List<Wound> wounds = get(p).get(part);
         if (wounds.isEmpty()) return new Check("No wounds on your " + part.label.toLowerCase() + ".", 0);
 
+        if (isApply(a)) {
+            DressingType dt = dressingOf(a);
+            Wound w = pick(wounds, x -> x.dressing == DressingType.NONE && dt.canCover(x.type));
+            if (w == null) return new Check("Nothing there that a " + dt.label.toLowerCase() + " can cover.", 0);
+            if (!hasItem(p, itemOf(a))) return new Check("You don't have that item.", 0);
+            return new Check(null, duration(a, w));
+        }
+
         switch (a) {
             case DISINFECT -> {
                 Wound w = pick(wounds, x -> x.type != WoundType.FRACTURE && x.infection > 0f && x.dressing == DressingType.NONE);
@@ -399,16 +490,6 @@ public final class InjuryManager {
                     return new Check(dressed ? "Remove the dressing first." : "No infection to disinfect there.", 0);
                 }
                 if (!hasItem(p, TrueHealing.WIPE.get())) return new Check("You need alcohol wipes.", 0);
-                return new Check(null, duration(a, w));
-            }
-            case RAG, BANDAGE, BANDAID -> {
-                DressingType dt = a == TreatAction.RAG ? DressingType.RAG
-                        : a == TreatAction.BANDAGE ? DressingType.BANDAGE : DressingType.BANDAID;
-                Item item = dt == DressingType.RAG ? TrueHealing.RAG.get()
-                        : dt == DressingType.BANDAGE ? TrueHealing.BANDAGE.get() : TrueHealing.BANDAID.get();
-                Wound w = pick(wounds, x -> x.dressing == DressingType.NONE && dt.canCover(x.type));
-                if (w == null) return new Check("Nothing there that a " + dt.label.toLowerCase() + " can cover.", 0);
-                if (!hasItem(p, item)) return new Check("You don't have a " + dt.label.toLowerCase() + ".", 0);
                 return new Check(null, duration(a, w));
             }
             case STITCH -> {
@@ -441,6 +522,7 @@ public final class InjuryManager {
                 if (w == null) return new Check("No splint to remove.", 0);
                 return new Check(null, duration(a, w));
             }
+            default -> { }
         }
         return new Check("Nothing to do.", 0);
     }
@@ -493,26 +575,29 @@ public final class InjuryManager {
         List<Wound> wounds = d.get(part);
         String where = part.label.toLowerCase();
 
+        if (isApply(action)) {
+            DressingType dt = dressingOf(action);
+            boolean dirty = action == TreatAction.DIRTY_RAG || action == TreatAction.DIRTY_BANDAGE;
+            Wound w = pick(wounds, x -> x.dressing == DressingType.NONE && dt.canCover(x.type));
+            if (w == null || !consume(p, itemOf(action))) return;
+            w.dressing = dt;
+            w.dressingAge = dirty ? dt.lifeTicks : 0; // a dirty rag/bandage goes on already dirty
+            sound(p, SoundEvents.WOOL_PLACE);
+            msg(p, "Applied a " + (dirty ? "dirty " : "") + dt.label.toLowerCase() + " to your " + where + ".");
+            save(p);
+            sync(p);
+            return;
+        }
+
         switch (action) {
             case DISINFECT -> {
                 Wound w = pick(wounds, x -> x.type != WoundType.FRACTURE && x.infection > 0f && x.dressing == DressingType.NONE);
                 if (w == null || !consume(p, TrueHealing.WIPE.get())) return;
+                w.infection = Math.max(0f, w.infection - 40f);   // twice what an antibiotic does...
+                w.curing = w.infection > 0f;                     // ...and it keeps dropping until it is gone
                 w.disinfectTicks = DISINFECT_TICKS;
-                w.infection = Math.max(0f, w.infection - 35f);
                 sound(p, SoundEvents.BOTTLE_FILL);
                 msg(p, "Disinfected your " + where + ".");
-            }
-            case RAG, BANDAGE, BANDAID -> {
-                DressingType dt = action == TreatAction.RAG ? DressingType.RAG
-                        : action == TreatAction.BANDAGE ? DressingType.BANDAGE : DressingType.BANDAID;
-                Item item = dt == DressingType.RAG ? TrueHealing.RAG.get()
-                        : dt == DressingType.BANDAGE ? TrueHealing.BANDAGE.get() : TrueHealing.BANDAID.get();
-                Wound w = pick(wounds, x -> x.dressing == DressingType.NONE && dt.canCover(x.type));
-                if (w == null || !consume(p, item)) return;
-                w.dressing = dt;
-                w.dressingAge = 0;
-                sound(p, SoundEvents.WOOL_PLACE);
-                msg(p, "Applied a " + dt.label.toLowerCase() + " to your " + where + ".");
             }
             case STITCH -> {
                 Wound w = pick(wounds, x -> !x.stitched && x.type != WoundType.SCRATCH
@@ -552,6 +637,7 @@ public final class InjuryManager {
                 msg(p, "Took the splint off your " + where + ".");
                 updateSlow(p, d);
             }
+            default -> { }
         }
         save(p);
         sync(p);

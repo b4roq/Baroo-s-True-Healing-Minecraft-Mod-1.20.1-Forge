@@ -29,7 +29,7 @@ public final class MoodleHud {
     private static final ResourceLocation TEX = new ResourceLocation(TrueHealing.MODID, "textures/gui/moodles.png");
 
     // icon columns in the second row of the atlas
-    private static final int ICON_FOOD = 0, ICON_PANIC = 1, ICON_BLEED = 2, ICON_INJURED = 3, ICON_PAIN = 4, ICON_LEG = 5;
+    private static final int ICON_FOOD = 0, ICON_PANIC = 1, ICON_BLEED = 2, ICON_INJURED = 3, ICON_PAIN = 4, ICON_LEG = 5, ICON_SICK = 6;
 
     private static final int BASE_SIZE = 24, BASE_GAP = 3;
     public static final int PANEL_W = BASE_SIZE;
@@ -93,6 +93,20 @@ public final class MoodleHud {
                             "Thing's are getting a little bit too tense around you.",
                             "Your mind is racing, You're too overwhelmed",
                             "Aaaaaaaaghhh!!!"}[lv - 1])));
+        }
+
+        // ---- sickness: infected wounds and the sickness that lingers after one heals ----
+        float sick = d.sickness;
+        for (BodyPart bp : BodyPart.values()) for (Wound w : d.get(bp)) sick = Math.max(sick, w.infection);
+        if (sick > 0f) {
+            int lv = sick < 25f ? 1 : sick < 50f ? 2 : sick < 75f ? 3 : 4;
+            out.add(new Moodle(red(lv), ICON_SICK,
+                    new String[]{"Queasy", "Nauseous", "Sick", "Fever"}[lv - 1],
+                    List.of(new String[]{
+                            "Take things easy",
+                            "Strength and healing reduced",
+                            "Strength and healing severely reduced",
+                            "Increasing danger of death."}[lv - 1])));
         }
 
         // ---- bleeding / injured ----
@@ -267,7 +281,8 @@ public final class MoodleHud {
      */
     public static Panel inventoryPanel(Minecraft mc, InventoryScreen s) {
         int left = s.getGuiLeft();
-        if (s.getRecipeBookComponent().isVisible()) left -= 148; // width of the recipe book
+        // the recipe book panel is 148 wide and its tab column sticks out another 30 to the left
+        if (s.getRecipeBookComponent().isVisible()) left -= 148 + 30;
         int x = Math.max(2, left - 4 - BASE_SIZE);
         return panel(mc, x, s.getGuiTop());
     }

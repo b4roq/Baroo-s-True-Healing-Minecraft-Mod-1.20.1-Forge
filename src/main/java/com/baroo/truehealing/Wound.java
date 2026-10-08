@@ -15,6 +15,7 @@ public class Wound {
     public int dressingAge;      // ticks the dressing has been on
     public float infection;      // 0 = clean, 1..100 = infected
     public int healProgress;     // ticks of healing accumulated
+    public boolean curing;       // alcohol wipes are slowly lowering the infection
     public boolean splinted;     // fractures only
 
     public Wound(WoundType type) { this.type = type; }
@@ -63,6 +64,7 @@ public class Wound {
         t.putFloat("inf", infection);
         t.putInt("heal", healProgress);
         t.putBoolean("sp", splinted);
+        t.putBoolean("cure", curing);
         return t;
     }
 
@@ -78,6 +80,7 @@ public class Wound {
         w.infection = t.getFloat("inf");
         w.healProgress = t.getInt("heal");
         w.splinted = t.getBoolean("sp");
+        w.curing = t.getBoolean("cure");
         return w;
     }
 }

@@ -7,6 +7,7 @@ import java.util.Map;
 
 import org.joml.Quaternionf;
 
+import com.baroo.truehealing.ArmorProtection;
 import com.baroo.truehealing.BodyPart;
 import com.baroo.truehealing.ClientData;
 import com.baroo.truehealing.DressingType;
@@ -23,15 +24,22 @@ import net.minecraft.client.gui.screens.inventory.InventoryScreen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.Mth;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 
 public class MedicalScreen extends Screen {
     private static final TreatAction[] SUPPLY = {
             TreatAction.DISINFECT, TreatAction.RAG, TreatAction.BANDAID,
-            TreatAction.STITCH, TreatAction.BANDAGE, TreatAction.SPLINT};
-    private static final String[] SUPPLY_LABEL = {"Alcohol Wipes", "Rag", "Bandaid", "Suture Needle", "Bandage", "Splint"};
+            TreatAction.STITCH, TreatAction.BANDAGE, TreatAction.SPLINT,
+            TreatAction.DIRTY_RAG, TreatAction.DIRTY_BANDAGE};
+    private static final String[] SUPPLY_LABEL = {"Alcohol Wipes", "Rag", "Bandaid", "Suture Needle", "Bandage", "Splint",
+            "Rag (Dirty)", "Bandage (Dirty)"};
+
+    private static final EquipmentSlot[] ARMOR_SLOTS = {EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET};
+    private static final String[] ARMOR_LABEL = {"Head", "Chest", "Legs", "Feet"}; 
 
     private static final int ENTRY_H = 18;
     private static final int STITCHED_GREEN = 0x2FA84F;
@@ -169,6 +177,8 @@ public class MedicalScreen extends Screen {
             case BANDAGE -> TrueHealing.BANDAGE.get();
             case BANDAID -> TrueHealing.BANDAID.get();
             case SPLINT -> TrueHealing.SPLINT.get();
+            case DIRTY_RAG -> TrueHealing.DIRTY_RAG.get();
+            case DIRTY_BANDAGE -> TrueHealing.DIRTY_BANDAGE.get();
             case REMOVE, REMOVE_SPLINT -> null;
         };
     }
@@ -192,6 +202,8 @@ public class MedicalScreen extends Screen {
             case RAG -> ws.stream().anyMatch(w -> w.dressing == DressingType.NONE && DressingType.RAG.canCover(w.type));
             case BANDAGE -> ws.stream().anyMatch(w -> w.dressing == DressingType.NONE && DressingType.BANDAGE.canCover(w.type));
             case BANDAID -> ws.stream().anyMatch(w -> w.dressing == DressingType.NONE && DressingType.BANDAID.canCover(w.type));
+            case DIRTY_RAG -> ws.stream().anyMatch(w -> w.dressing == DressingType.NONE && DressingType.RAG.canCover(w.type));
+            case DIRTY_BANDAGE -> ws.stream().anyMatch(w -> w.dressing == DressingType.NONE && DressingType.BANDAGE.canCover(w.type));
             case SPLINT -> ws.stream().anyMatch(w -> w.type == WoundType.FRACTURE && !w.splinted);
             case REMOVE -> ws.stream().anyMatch(w -> w.dressing != DressingType.NONE);
             case REMOVE_SPLINT -> ws.stream().anyMatch(w -> w.type == WoundType.FRACTURE && w.splinted);
@@ -337,6 +349,8 @@ public class MedicalScreen extends Screen {
         if (canDo(TreatAction.RAG, part)) bandage.add(new MenuEntry("Rag", TreatAction.RAG, TrueHealing.RAG.get(), null, true));
         if (canDo(TreatAction.BANDAGE, part)) bandage.add(new MenuEntry("Bandage", TreatAction.BANDAGE, TrueHealing.BANDAGE.get(), null, true));
         if (canDo(TreatAction.BANDAID, part)) bandage.add(new MenuEntry("Bandaid", TreatAction.BANDAID, TrueHealing.BANDAID.get(), null, true));
+        if (canDo(TreatAction.DIRTY_RAG, part)) bandage.add(new MenuEntry("Rag (Dirty)", TreatAction.DIRTY_RAG, TrueHealing.DIRTY_RAG.get(), null, true));
+        if (canDo(TreatAction.DIRTY_BANDAGE, part)) bandage.add(new MenuEntry("Bandage (Dirty)", TreatAction.DIRTY_BANDAGE, TrueHealing.DIRTY_BANDAGE.get(), null, true));
         if (!bandage.isEmpty()) out.add(new MenuEntry("Bandage", null, null, bandage, true));
         if (canDo(TreatAction.DISINFECT, part)) out.add(new MenuEntry("Disinfect", TreatAction.DISINFECT, null, null, true));
         if (canDo(TreatAction.STITCH, part)) out.add(new MenuEntry("Stitch", TreatAction.STITCH, null, null, true));
@@ -548,6 +562,7 @@ public class MedicalScreen extends Screen {
         drawHealth(g);
         drawInjuryList(g, mx, my);
         renderModel(g, mx, my);
+        List<Component> armorTip = drawArmorColumn(g, mx, my);
 
         BodyPart hovered = menuOpen ? null : partAt(mx, my);
 
@@ -595,6 +610,8 @@ public class MedicalScreen extends Screen {
                 g.renderItem(new ItemStack(it), mx - 8, my - 8);
                 g.pose().popPose();
             }
+        } else if (armorTip != null && !menuOpen) {
+            g.renderComponentTooltip(font, armorTip, mx, my);
         } else if (moodles != null && !menuOpen && MoodleHud.tipFor(moodles, mx, my) != null) {
             g.renderComponentTooltip(font, MoodleHud.tipFor(moodles, mx, my), mx, my);
         } else if (hovered != null) {
@@ -603,10 +620,66 @@ public class MedicalScreen extends Screen {
             List<Wound> hw = ClientData.data.get(hovered);
             if (hw.isEmpty()) tip.add(Component.literal("Healthy").withStyle(ChatFormatting.GRAY));
             else for (Wound w : hw) tip.addAll(describe(w));
+            addProtectionLines(tip, hovered);
             g.renderComponentTooltip(font, tip, mx, my);
         }
 
         drawMenu(g, mx, my);
+    }
+
+    // ---------------- armor ----------------
+
+    private static String pct(double v) { return Math.round(v * 100) + "%"; }
+
+    /** "Injury protection" lines for a body part that is covered by armor (the % is the chance to deflect an injury). */
+    private void addProtectionLines(List<Component> tip, BodyPart part) {
+        if (minecraft == null || minecraft.player == null) return;
+        Player pl = minecraft.player;
+        double all = ArmorProtection.forPart(pl, part, ArmorProtection.Kind.GENERIC);
+        if (all <= 0) return;
+        tip.add(Component.literal("Injury protection: " + pct(all)).withStyle(ChatFormatting.AQUA));
+        double proj = ArmorProtection.forPart(pl, part, ArmorProtection.Kind.PROJECTILE);
+        double blast = ArmorProtection.forPart(pl, part, ArmorProtection.Kind.EXPLOSION);
+        if (Math.round(proj * 100) != Math.round(all * 100)) {
+            tip.add(Component.literal("  vs projectiles: " + pct(proj)).withStyle(ChatFormatting.GRAY));
+        }
+        if (Math.round(blast * 100) != Math.round(all * 100)) {
+            tip.add(Component.literal("  vs explosions: " + pct(blast)).withStyle(ChatFormatting.GRAY));
+        }
+    }
+
+    /** The four worn armor pieces on the left of the player model, each with its chance to deflect an injury. */
+    private List<Component> drawArmorColumn(GuiGraphics g, int mx, int my) {
+        if (minecraft == null || minecraft.player == null) return null;
+        Player pl = minecraft.player;
+        int x = leftEnd + 18;
+        int y0 = Math.max(100, (int) (height * 0.2));
+        List<Component> tip = null;
+        for (int i = 0; i < ARMOR_SLOTS.length; i++) {
+            EquipmentSlot slot = ARMOR_SLOTS[i];
+            ItemStack stack = pl.getItemBySlot(slot);
+            double v = ArmorProtection.piece(pl, slot, ArmorProtection.Kind.GENERIC);
+            int y = y0 + i * 34;
+            if (!stack.isEmpty()) g.renderItem(stack, x, y);
+            else g.fill(x + 5, y + 5, x + 11, y + 11, 0x30FFFFFF);
+            g.drawString(font, pct(v), x + 22, y, v > 0 ? 0xBFE8FF : 0x6C747C, false);
+            g.drawString(font, ARMOR_LABEL[i], x + 22, y + 10, 0x6C747C, false);
+            if (mx >= x && mx < x + 72 && my >= y - 2 && my < y + 20) {
+                tip = new ArrayList<>();
+                tip.add(stack.isEmpty() ? Component.literal(ARMOR_LABEL[i] + ": nothing worn").withStyle(ChatFormatting.GRAY)
+                        : stack.getHoverName());
+                tip.add(Component.literal("Deflects " + pct(v) + " of injuries").withStyle(ChatFormatting.AQUA));
+                switch (slot) {
+                    case HEAD -> tip.add(Component.literal("Protects the head.").withStyle(ChatFormatting.GRAY));
+                    case CHEST -> tip.add(Component.literal("Protects the torso and both arms.").withStyle(ChatFormatting.GRAY));
+                    case LEGS, FEET -> tip.add(Component.literal("Both legs, with the "
+                            + (slot == EquipmentSlot.LEGS ? "boots" : "leggings") + ": "
+                            + pct(ArmorProtection.legs(pl, ArmorProtection.Kind.GENERIC))).withStyle(ChatFormatting.GRAY));
+                    default -> { }
+                }
+            }
+        }
+        return tip;
     }
 
     private void drawInjuryList(GuiGraphics g, int mx, int my) {
@@ -708,11 +781,10 @@ public class MedicalScreen extends Screen {
                     n > 0 ? 0xFFFFFF : 0x707880, false);
         }
 
-        int dirtyRag = count(TrueHealing.DIRTY_RAG.get()), dirtyBand = count(TrueHealing.DIRTY_BANDAGE.get());
-        if (dirtyRag + dirtyBand > 0) {
+        if (count(TrueHealing.DIRTY_RAG.get()) + count(TrueHealing.DIRTY_BANDAGE.get()) > 0) {
             int dy = supplyTop + SUPPLY.length * rowH + 6;
-            g.drawString(font, "Dirty: " + dirtyRag + " rag(s), " + dirtyBand + " bandage(s)", rx, dy, 0xB89868, false);
-            g.drawString(font, "Wash with a water bottle in the crafting grid", rx, dy + 10, 0x6C747C, false);
+            g.drawString(font, "Wash dirty cloth with a water bottle or", rx, dy, 0x6C747C, false);
+            g.drawString(font, "bucket in the crafting grid.", rx, dy + 10, 0x6C747C, false);
         }
     }
 

@@ -15,8 +15,9 @@ import net.minecraft.world.item.crafting.RecipeSerializer;
 import net.minecraft.world.level.Level;
 
 /**
- * "Item + water bottle" recipes that use up the water but hand the empty glass bottle back
- * (like the cake recipe returns the milk bucket).
+ * Recipes that use up water but hand the empty container back (glass bottle or bucket):
+ *  - dirty rag / dirty bandage + water  -> clean rag / bandage
+ *  - 2 sugar + paper + water            -> 1 alcohol wipes
  */
 public class WaterCraftRecipe extends CustomRecipe {
     public enum Kind { WASH_RAG, WASH_BANDAGE, WIPE }
@@ -44,29 +45,28 @@ public class WaterCraftRecipe extends CustomRecipe {
         };
     }
 
-    private static boolean isWater(ItemStack s) {
+    private static boolean isWaterBottle(ItemStack s) {
         return s.is(Items.POTION) && PotionUtils.getPotion(s) == Potions.WATER;
+    }
+
+    private static boolean isWater(ItemStack s) {
+        return isWaterBottle(s) || s.is(Items.WATER_BUCKET);
     }
 
     @Override
     public boolean matches(CraftingContainer c, Level level) {
-        boolean water = false, main = false;
-        int n = 0;
+        int n = 0, water = 0, main = 0, sugar = 0;
         for (int i = 0; i < c.getContainerSize(); i++) {
             ItemStack s = c.getItem(i);
             if (s.isEmpty()) continue;
             n++;
-            if (isWater(s)) {
-                if (water) return false;
-                water = true;
-            } else if (s.is(input())) {
-                if (main) return false;
-                main = true;
-            } else {
-                return false;
-            }
+            if (isWater(s)) water++;
+            else if (s.is(input())) main++;
+            else if (kind == Kind.WIPE && s.is(Items.SUGAR)) sugar++;
+            else return false;
         }
-        return n == 2 && water && main;
+        if (kind == Kind.WIPE) return n == 4 && water == 1 && main == 1 && sugar == 2;
+        return n == 2 && water == 1 && main == 1;
     }
 
     @Override
@@ -78,14 +78,16 @@ public class WaterCraftRecipe extends CustomRecipe {
     public NonNullList<ItemStack> getRemainingItems(CraftingContainer c) {
         NonNullList<ItemStack> out = NonNullList.withSize(c.getContainerSize(), ItemStack.EMPTY);
         for (int i = 0; i < c.getContainerSize(); i++) {
-            if (isWater(c.getItem(i))) out.set(i, new ItemStack(Items.GLASS_BOTTLE));
+            ItemStack s = c.getItem(i);
+            if (isWaterBottle(s)) out.set(i, new ItemStack(Items.GLASS_BOTTLE));
+            else if (s.is(Items.WATER_BUCKET)) out.set(i, new ItemStack(Items.BUCKET));
         }
         return out;
     }
 
     @Override
     public boolean canCraftInDimensions(int w, int h) {
-        return w * h >= 2;
+        return w * h >= (kind == Kind.WIPE ? 4 : 2);
     }
 
     @Override

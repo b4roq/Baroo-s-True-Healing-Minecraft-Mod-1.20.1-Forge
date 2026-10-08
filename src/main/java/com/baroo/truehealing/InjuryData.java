@@ -12,6 +12,8 @@ public class InjuryData {
     private final EnumMap<BodyPart, List<Wound>> parts = new EnumMap<>(BodyPart.class);
     /** Remaining ticks of antibiotic effect (slows all infections). */
     public int antibioticTicks;
+    /** Lingering sickness (0..100) left over from healed infections; fades slowly. */
+    public float sickness;
 
     public InjuryData() {
         for (BodyPart p : BodyPart.values()) parts.put(p, new ArrayList<>());
@@ -43,6 +45,7 @@ public class InjuryData {
             root.put(p.name(), list);
         }
         root.putInt("abx", antibioticTicks);
+        root.putFloat("sick", sickness);
         return root;
     }
 
@@ -50,6 +53,7 @@ public class InjuryData {
         InjuryData d = new InjuryData();
         if (root == null) return d;
         d.antibioticTicks = root.getInt("abx");
+        d.sickness = root.getFloat("sick");
         for (BodyPart p : BodyPart.values()) {
             ListTag list = root.getList(p.name(), Tag.TAG_COMPOUND);
             for (int i = 0; i < list.size(); i++) d.parts.get(p).add(Wound.load(list.getCompound(i)));
